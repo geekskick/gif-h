@@ -72,16 +72,59 @@ struct gif_palette
     uint8_t tree_split[255];
 };
 
-// max, min, and abs functions
-int gif_i_max(int l, int r) { return l>r?l:r; }
-int gif_i_min(int l, int r) { return l<r?l:r; }
-int gif_i_abs(int i) { return i<0?-i:i; }
+struct gif_size{
+    unsigned int width;
+    unsigned int height;
+};
 
-// walks the k-d tree to pick the palette entry for a desired color.
-// Takes as in/out parameters the current best color and its error -
-// only changes them if it finds a better color in its subtree.
-// this is the major hotspot in the code at the moment.
-void git_get_closest_palette_colour(struct gif_palette* p_pal, int r, int g, int b, int* best_ind, int* best_diff, int tree_root)
+struct gif_private{
+    uint8_t *old_image;
+    bool    first_frame;
+};
+
+struct gif_writer
+{
+    FILE* f;
+    struct gif_private priv;    ///< Private data, do not change in user land.
+    struct gif_size size;       ///< The dimensions of the gif
+    uint32_t delay;             ///< Hundredths of a second (0.01 seconds or 10 ms);
+};
+
+/// @brief Get the max of two numbers
+/// @param l left number
+/// @param r right number
+/// @return l,or r, whichever is largest
+int gif_i_max(int l, int r) {
+    return l>r?l:r;
+}
+
+/// @brief Get the min of two numbers
+/// @param l left number
+/// @param r right number
+/// @return l,or r, whichever is smallest
+int gif_i_min(int l, int r) {
+    return l<r?l:r;
+}
+
+/// @brief Get the absolute value of a number = abs(i)
+/// @param i the number
+/// @return The number, or if it's a negative value, then the number changed to positive
+int gif_i_abs(int i) {
+    return i<0?-i:i;
+}
+
+/// @brief walks the k-d tree to pick the palette entry for a desired color.
+/// Takes as in/out parameters the current best color and its error -
+/// only changes them if it finds a better color in its subtree.
+/// this is the major hotspot in the code at the moment.
+/// @param p_pal Pointer to the palette
+/// @param r the value of the red in the pixel
+/// @param g the value of the green in the pixel
+/// @param b the value of the blue in the pixel
+/// @param best_ind pointer to the best index matching the colour
+/// @param best_diff pointer to the best difference
+/// @param tree_root should be 1
+void gif_get_closest_palette_colour(struct gif_palette* p_pal, int r, int g, int b, int* best_ind, int* best_diff, int tree_root)
 {
     // base case, reached the bottom of the tree
     if(tree_root > (1<<p_pal->bit_depth)-1)
@@ -112,22 +155,23 @@ void git_get_closest_palette_colour(struct gif_palette* p_pal, int r, int g, int
     if(split_pos > split_comp)
     {
         // check the left subtree
-        git_get_closest_palette_colour(p_pal, r, g, b, best_ind, best_diff, tree_root*2);
+        gif_get_closest_palette_colour(p_pal, r, g, b, best_ind, best_diff, tree_root*2);
         if( *best_diff > split_pos - split_comp )
         {
             // cannot prove there's not a better value in the right subtree, check that too
-            git_get_closest_palette_colour(p_pal, r, g, b, best_ind, best_diff, tree_root*2+1);
+            gif_get_closest_palette_colour(p_pal, r, g, b, best_ind, best_diff, tree_root*2+1);
         }
     }
     else
     {
-        git_get_closest_palette_colour(p_pal, r, g, b, best_ind, best_diff, tree_root*2+1);
+        gif_get_closest_palette_colour(p_pal, r, g, b, best_ind, best_diff, tree_root*2+1);
         if( *best_diff > split_comp - split_pos )
         {
-            git_get_closest_palette_colour(p_pal, r, g, b, best_ind, best_diff, tree_root*2);
+            gif_get_closest_palette_colour(p_pal, r, g, b, best_ind, best_diff, tree_root*2);
         }
     }
 }
+
 
 void gif_swap_pixels(uint8_t* image, int pix_a, int pix_b)
 {
@@ -430,7 +474,7 @@ void gif_dither_image( const uint8_t* last_frame, const uint8_t* next_frame, uin
             int32_t best_idx = gif_transparent_idx;
 
             // Search the palete
-            git_get_closest_palette_colour(p_pal, rr, gg, bb, &best_idx, &best_diff, 1);
+            gif_get_closest_palette_colour(p_pal, rr, gg, bb, &best_idx, &best_diff, 1);
 
             // Write the result to the temp buffer
             int32_t r_err = next_pix[0] - (int32_t)p_pal->r[best_idx] * 256;
@@ -515,7 +559,7 @@ void gif_threshold_image( const uint8_t* last_frame, const uint8_t* next_frame, 
             // palettize the pixel
             int32_t best_diff = 1000000;
             int32_t best_idx = 1;
-            git_get_closest_palette_colour(p_pal, next_frame[0], next_frame[1], next_frame[2], &best_idx, &best_diff, 1);
+            gif_get_closest_palette_colour(p_pal, next_frame[0], next_frame[1], next_frame[2], &best_idx, &best_diff, 1);
 
             // Write the resulting color to the output buffer
             out_frame[0] = p_pal->r[best_idx];
@@ -723,17 +767,12 @@ void gif_write_lzw_image(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  
     GIF_TEMP_FREE(codetree);
 }
 
-struct gif_writer
-{
-    FILE* f;
-    uint8_t* old_image;
-    bool first_frame;
-};
+
 
 // Creates a gif file.
 // The input GIFWriter is assumed to be uninitialized.
 // The delay value is the time between frames in hundredths of a second - note that not all viewers pay much attention to this value.
-bool gif_begin( struct gif_writer* writer, const char* filename, uint32_t width, uint32_t height, uint32_t delay)
+bool gif_begin( struct gif_writer* writer, const char* filename)
 {
 	
 #if defined(_MSC_VER) && (_MSC_VER >= 1400)
@@ -743,24 +782,28 @@ bool gif_begin( struct gif_writer* writer, const char* filename, uint32_t width,
     writer->f = fopen(filename, "wb");
 #endif
 	
-    if(!writer->f) return false;
+    if(!writer->f){
+        fprintf(stderr, "[%s:%d]\tError opening file %s in %s\n", __FILE__, __LINE__, filename, __FUNCTION__);
+        return false;
+    }
 
-    writer->first_frame = true;
+    writer->priv.first_frame = true;
 
     // allocate
-    writer->old_image = (uint8_t*)GIF_MALLOC(width*height*4);
-	if(NULL == writer->old_image){
-		fprintf(stderr, "[%s:%d]\tError allocating %u bytes for writer->old_image\n", __FILE__, __LINE__, width*height*4);
+    const size_t sz = gif_get_size(writer->size.width, writer->size.height);
+    writer->priv.old_image = (uint8_t*)GIF_MALLOC(sz);
+	if(NULL == writer->priv.old_image){
+        fprintf(stderr, "[%s:%d]\tError allocating %zu bytes for writer->old_image\n", __FILE__, __LINE__, sz);
 		return false;
 	}
 
     fputs("GIF89a", writer->f);
 
     // screen descriptor
-    fputc(width & 0xff, writer->f);
-    fputc((width >> 8) & 0xff, writer->f);
-    fputc(height & 0xff, writer->f);
-    fputc((height >> 8) & 0xff, writer->f);
+    fputc(writer->size.width & 0xff, writer->f);
+    fputc((writer->size.width >> 8) & 0xff, writer->f);
+    fputc(writer->size.height & 0xff, writer->f);
+    fputc((writer->size.height >> 8) & 0xff, writer->f);
 
     fputc(0xf0, writer->f);  // there is an unsorted global color table of 2 entries
     fputc(0, writer->f);     // background color
@@ -776,7 +819,7 @@ bool gif_begin( struct gif_writer* writer, const char* filename, uint32_t width,
     fputc(0, writer->f);
     fputc(0, writer->f);
 
-    if( delay != 0 )
+    if( writer->delay != 0 )
     {
         // animation header
         fputc(0x21, writer->f); // extension
@@ -799,22 +842,24 @@ bool gif_begin( struct gif_writer* writer, const char* filename, uint32_t width,
 // The GIFWriter should have been created by GIFBegin.
 // AFAIK, it is legal to use different bit depths for different frames of an image -
 // this may be handy to save bits in animations that don't change much.
-bool gif_write_frame( struct gif_writer* writer, const uint8_t* image, uint32_t width, uint32_t height, uint32_t delay, int bit_depth, bool dither )
+bool gif_write_frame( struct gif_writer* writer, const uint8_t* image, int bit_depth, bool dither )
 {
     if(!writer->f) return false;
 
-    const uint8_t* old_image = writer->first_frame? NULL : writer->old_image;
-    writer->first_frame = false;
+    const uint8_t* old_image = writer->priv.first_frame? NULL : writer->priv.old_image;
+    writer->priv.first_frame = false;
 
     struct gif_palette pal;
-    gif_make_palette((dither? NULL : old_image), image, width, height, bit_depth, dither, &pal);
+    gif_make_palette((dither? NULL : old_image), image, writer->size.width, writer->size.height, bit_depth, dither, &pal);
 
-    if(dither)
-        gif_dither_image(old_image, image, writer->old_image, width, height, &pal);
-    else
-        gif_threshold_image(old_image, image, writer->old_image, width, height, &pal);
+    if(dither){
+        gif_dither_image(writer->priv.old_image, image, writer->priv.old_image, writer->size.width, writer->size.height, &pal);
+    }
+    else{
+        gif_threshold_image(writer->priv.old_image, image, writer->priv.old_image,writer->size.width, writer->size.height, &pal);
+    }
 
-    gif_write_lzw_image(writer->f, writer->old_image, 0, 0, width, height, delay, &pal);
+    gif_write_lzw_image(writer->f, writer->priv.old_image, 0, 0, writer->size.width, writer->size.height, writer->delay, &pal);
 
     return true;
 }
@@ -830,10 +875,10 @@ bool gif_end( struct gif_writer* writer )
 
     fputc(0x3b, writer->f); // end of file
     fclose(writer->f);
-    GIF_FREE(writer->old_image);
+    GIF_FREE(writer->priv.old_image);
 
     writer->f = NULL;
-    writer->old_image = NULL;
+    writer->priv.old_image = NULL;
 
     return true;
 }
