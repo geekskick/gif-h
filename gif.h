@@ -55,7 +55,7 @@
 #define GIF_FREE free
 #endif
 
-const int gif_trans_idx = 0;
+const int gif_transparent_idx = 0;
 
 struct gif_palette
 {
@@ -87,7 +87,7 @@ void git_get_closest_palette_colour(struct gif_palette* p_pal, int r, int g, int
     if(tree_root > (1<<p_pal->bit_depth)-1)
     {
         int ind = tree_root-(1<<p_pal->bit_depth);
-        if(ind == gif_trans_idx) return;
+        if(ind == gif_transparent_idx) return;
 
         // check whether this color is better than the current winner
         int r_err = r - ((int32_t)p_pal->r[ind]);
@@ -384,63 +384,63 @@ void gif_make_palette( const uint8_t* last_frame, const uint8_t* next_frame, uin
 }
 
 // Implements Floyd-Steinberg dithering, writes palette value to alpha
-void GifDitherImage( const uint8_t* lastFrame, const uint8_t* nextFrame, uint8_t* outFrame, uint32_t width, uint32_t height, struct gif_palette* pPal )
+void gif_dither_image( const uint8_t* last_frame, const uint8_t* next_frame, uint8_t* out_frame, uint32_t width, uint32_t height, struct gif_palette* p_pal )
 {
-    int numPixels = (int)(width * height);
+    int num_pixels = (int)(width * height);
 
     // quantPixels initially holds color*256 for all pixels
     // The extra 8 bits of precision allow for sub-single-color error values
     // to be propagated
-    int32_t *quantPixels = (int32_t *)GIF_TEMP_MALLOC(sizeof(int32_t) * (size_t)numPixels * 4);
+    int32_t *quant_pixels = (int32_t *)GIF_TEMP_MALLOC(sizeof(int32_t) * (size_t)num_pixels * 4);
 
-    for( int ii=0; ii<numPixels*4; ++ii )
+    for( int ii=0; ii<num_pixels*4; ++ii )
     {
-        uint8_t pix = nextFrame[ii];
+        uint8_t pix = next_frame[ii];
         int32_t pix16 = ((int32_t)pix) * 256;
-        quantPixels[ii] = pix16;
+        quant_pixels[ii] = pix16;
     }
 
     for( uint32_t yy=0; yy<height; ++yy )
     {
         for( uint32_t xx=0; xx<width; ++xx )
         {
-            int32_t* nextPix = quantPixels + 4*(yy*width+xx);
-            const uint8_t* lastPix = lastFrame? lastFrame + 4*(yy*width+xx) : NULL;
+            int32_t* next_pix = quant_pixels + 4*(yy*width+xx);
+            const uint8_t* last_pix = last_frame? last_frame + 4*(yy*width+xx) : NULL;
 
             // Compute the colors we want (rounding to nearest)
-            int32_t rr = (nextPix[0] + 127) / 256;
-            int32_t gg = (nextPix[1] + 127) / 256;
-            int32_t bb = (nextPix[2] + 127) / 256;
+            int32_t rr = (next_pix[0] + 127) / 256;
+            int32_t gg = (next_pix[1] + 127) / 256;
+            int32_t bb = (next_pix[2] + 127) / 256;
 
             // if it happens that we want the color from last frame, then just write out
             // a transparent pixel
-            if( lastFrame &&
-               lastPix[0] == rr &&
-               lastPix[1] == gg &&
-               lastPix[2] == bb )
+            if( last_frame &&
+               last_pix[0] == rr &&
+               last_pix[1] == gg &&
+               last_pix[2] == bb )
             {
-                nextPix[0] = rr;
-                nextPix[1] = gg;
-                nextPix[2] = bb;
-                nextPix[3] = gif_trans_idx;
+                next_pix[0] = rr;
+                next_pix[1] = gg;
+                next_pix[2] = bb;
+                next_pix[3] = gif_transparent_idx;
                 continue;
             }
 
-            int32_t bestDiff = 1000000;
-            int32_t bestInd = gif_trans_idx;
+            int32_t best_diff = 1000000;
+            int32_t best_idx = gif_transparent_idx;
 
             // Search the palete
-            git_get_closest_palette_colour(pPal, rr, gg, bb, &bestInd, &bestDiff, 1);
+            git_get_closest_palette_colour(p_pal, rr, gg, bb, &best_idx, &best_diff, 1);
 
             // Write the result to the temp buffer
-            int32_t r_err = nextPix[0] - (int32_t)pPal->r[bestInd] * 256;
-            int32_t g_err = nextPix[1] - (int32_t)pPal->g[bestInd] * 256;
-            int32_t b_err = nextPix[2] - (int32_t)pPal->b[bestInd] * 256;
+            int32_t r_err = next_pix[0] - (int32_t)p_pal->r[best_idx] * 256;
+            int32_t g_err = next_pix[1] - (int32_t)p_pal->g[best_idx] * 256;
+            int32_t b_err = next_pix[2] - (int32_t)p_pal->b[best_idx] * 256;
 
-            nextPix[0] = pPal->r[bestInd];
-            nextPix[1] = pPal->g[bestInd];
-            nextPix[2] = pPal->b[bestInd];
-            nextPix[3] = bestInd;
+            next_pix[0] = p_pal->r[best_idx];
+            next_pix[1] = p_pal->g[best_idx];
+            next_pix[2] = p_pal->b[best_idx];
+            next_pix[3] = best_idx;
 
             // Propagate the error to the four adjacent locations
             // that we haven't touched yet
@@ -449,33 +449,33 @@ void GifDitherImage( const uint8_t* lastFrame, const uint8_t* nextFrame, uint8_t
             int quantloc_5 = (int)(yy * width + width + xx);
             int quantloc_1 = (int)(yy * width + width + xx + 1);
 
-            if(quantloc_7 < numPixels)
+            if(quantloc_7 < num_pixels)
             {
-                int32_t* pix7 = quantPixels+4*quantloc_7;
+                int32_t* pix7 = quant_pixels+4*quantloc_7;
                 pix7[0] += gif_i_max( -pix7[0], r_err * 7 / 16 );
                 pix7[1] += gif_i_max( -pix7[1], g_err * 7 / 16 );
                 pix7[2] += gif_i_max( -pix7[2], b_err * 7 / 16 );
             }
 
-            if(quantloc_3 < numPixels)
+            if(quantloc_3 < num_pixels)
             {
-                int32_t* pix3 = quantPixels+4*quantloc_3;
+                int32_t* pix3 = quant_pixels+4*quantloc_3;
                 pix3[0] += gif_i_max( -pix3[0], r_err * 3 / 16 );
                 pix3[1] += gif_i_max( -pix3[1], g_err * 3 / 16 );
                 pix3[2] += gif_i_max( -pix3[2], b_err * 3 / 16 );
             }
 
-            if(quantloc_5 < numPixels)
+            if(quantloc_5 < num_pixels)
             {
-                int32_t* pix5 = quantPixels+4*quantloc_5;
+                int32_t* pix5 = quant_pixels+4*quantloc_5;
                 pix5[0] += gif_i_max( -pix5[0], r_err * 5 / 16 );
                 pix5[1] += gif_i_max( -pix5[1], g_err * 5 / 16 );
                 pix5[2] += gif_i_max( -pix5[2], b_err * 5 / 16 );
             }
 
-            if(quantloc_1 < numPixels)
+            if(quantloc_1 < num_pixels)
             {
-                int32_t* pix1 = quantPixels+4*quantloc_1;
+                int32_t* pix1 = quant_pixels+4*quantloc_1;
                 pix1[0] += gif_i_max( -pix1[0], r_err / 16 );
                 pix1[1] += gif_i_max( -pix1[1], g_err / 16 );
                 pix1[2] += gif_i_max( -pix1[2], b_err / 16 );
@@ -484,125 +484,125 @@ void GifDitherImage( const uint8_t* lastFrame, const uint8_t* nextFrame, uint8_t
     }
 
     // Copy the palettized result to the output buffer
-    for( int ii=0; ii<numPixels*4; ++ii )
+    for( int ii=0; ii<num_pixels*4; ++ii )
     {
-        outFrame[ii] = (uint8_t)quantPixels[ii];
+        out_frame[ii] = (uint8_t)quant_pixels[ii];
     }
 
-    GIF_TEMP_FREE(quantPixels);
+    GIF_TEMP_FREE(quant_pixels);
 }
 
 // Picks palette colors for the image using simple thresholding, no dithering
-void GifThresholdImage( const uint8_t* lastFrame, const uint8_t* nextFrame, uint8_t* outFrame, uint32_t width, uint32_t height, struct gif_palette* pPal )
+void gif_threshold_image( const uint8_t* last_frame, const uint8_t* next_frame, uint8_t* out_frame, uint32_t width, uint32_t height, struct gif_palette* p_pal )
 {
-    uint32_t numPixels = width*height;
-    for( uint32_t ii=0; ii<numPixels; ++ii )
+    uint32_t num_pixels = width * height;
+    for( uint32_t ii=0; ii<num_pixels; ++ii )
     {
         // if a previous color is available, and it matches the current color,
         // set the pixel to transparent
-        if(lastFrame &&
-           lastFrame[0] == nextFrame[0] &&
-           lastFrame[1] == nextFrame[1] &&
-           lastFrame[2] == nextFrame[2])
+        if(last_frame &&
+           last_frame[0] == next_frame[0] &&
+           last_frame[1] == next_frame[1] &&
+           last_frame[2] == next_frame[2])
         {
-            outFrame[0] = lastFrame[0];
-            outFrame[1] = lastFrame[1];
-            outFrame[2] = lastFrame[2];
-            outFrame[3] = gif_trans_idx;
+            out_frame[0] = last_frame[0];
+            out_frame[1] = last_frame[1];
+            out_frame[2] = last_frame[2];
+            out_frame[3] = gif_transparent_idx;
         }
         else
         {
             // palettize the pixel
-            int32_t bestDiff = 1000000;
-            int32_t bestInd = 1;
-            git_get_closest_palette_colour(pPal, nextFrame[0], nextFrame[1], nextFrame[2], &bestInd, &bestDiff, 1);
+            int32_t best_diff = 1000000;
+            int32_t best_idx = 1;
+            git_get_closest_palette_colour(p_pal, next_frame[0], next_frame[1], next_frame[2], &best_idx, &best_diff, 1);
 
             // Write the resulting color to the output buffer
-            outFrame[0] = pPal->r[bestInd];
-            outFrame[1] = pPal->g[bestInd];
-            outFrame[2] = pPal->b[bestInd];
-            outFrame[3] = (uint8_t)bestInd;
+            out_frame[0] = p_pal->r[best_idx];
+            out_frame[1] = p_pal->g[best_idx];
+            out_frame[2] = p_pal->b[best_idx];
+            out_frame[3] = (uint8_t)best_idx;
         }
 
-        if(lastFrame) lastFrame += 4;
-        outFrame += 4;
-        nextFrame += 4;
+        if(last_frame) last_frame += 4;
+        out_frame += 4;
+        next_frame += 4;
     }
 }
 
 // Simple structure to write out the LZW-compressed portion of the image
 // one bit at a time
-struct GifBitStatus
+struct gif_bit_status
 {
-    uint8_t bitIndex;  // how many bits in the partial byte written so far
+    uint8_t bit_idx;  // how many bits in the partial byte written so far
     uint8_t byte;      // current partial byte
 
-    uint32_t chunkIndex;
+    uint32_t chunk_idx;
     uint8_t chunk[256];   // bytes are written in here until we have 256 of them, then written to the file
 };
 
 // insert a single bit
-void GifWriteBit( struct GifBitStatus* stat, uint32_t bit )
+void gif_write_bit( struct gif_bit_status* stat, uint32_t bit )
 {
     bit = bit & 1;
-    bit = bit << stat->bitIndex;
+    bit = bit << stat->bit_idx;
     stat->byte |= bit;
 
-    ++stat->bitIndex;
-    if( stat->bitIndex > 7 )
+    ++stat->bit_idx;
+    if( stat->bit_idx > 7 )
     {
         // move the newly-finished byte to the chunk buffer
-        stat->chunk[stat->chunkIndex++] = stat->byte;
+        stat->chunk[stat->chunk_idx++] = stat->byte;
         // and start a new byte
-        stat->bitIndex = 0;
+        stat->bit_idx = 0;
         stat->byte = 0;
     }
 }
 
 // write all bytes so far to the file
-void GifWriteChunk( FILE* f, struct GifBitStatus* stat )
+void gif_write_chunk( FILE* f, struct gif_bit_status* stat )
 {
-    fputc((int)stat->chunkIndex, f);
-    fwrite(stat->chunk, 1, stat->chunkIndex, f);
+    fputc((int)stat->chunk_idx, f);
+    fwrite(stat->chunk, 1, stat->chunk_idx, f);
 
-    stat->bitIndex = 0;
+    stat->bit_idx = 0;
     stat->byte = 0;
-    stat->chunkIndex = 0;
+    stat->chunk_idx = 0;
 }
 
-void GifWriteCode( FILE* f, struct GifBitStatus* stat, uint32_t code, uint32_t length )
+void gif_write_code( FILE* f, struct gif_bit_status* stat, uint32_t code, uint32_t length )
 {
     for( uint32_t ii=0; ii<length; ++ii )
     {
-        GifWriteBit(stat, code);
+        gif_write_bit(stat, code);
         code = code >> 1;
 
-        if( stat->chunkIndex == 255 )
+        if( stat->chunk_idx == 255 )
         {
-            GifWriteChunk(f, stat);
+            gif_write_chunk(f, stat);
         }
     }
 }
 
 // The LZW dictionary is a 256-ary tree constructed as the file is encoded,
 // this is one node
-struct GifLzwNode
+struct gif_lzw_code
 {
-    uint16_t m_next[256];
+    uint16_t next[256];
 };
 
 // write a 256-color (8-bit) image palette to the file
-void GifWritePalette(struct gif_palette* pPal, FILE* f )
+void gif_write_palette(struct gif_palette* p_pal, FILE* f )
 {
     fputc(0, f);  // first color: transparency
     fputc(0, f);
     fputc(0, f);
 
-    for(int ii=1; ii<(1 << pPal->bit_depth); ++ii)
+    for(int ii=1; ii<(1 << p_pal->bit_depth); ++ii)
     {
-        uint32_t r = pPal->r[ii];
-        uint32_t g = pPal->g[ii];
-        uint32_t b = pPal->b[ii];
+        uint32_t r = p_pal->r[ii];
+        uint32_t g = p_pal->g[ii];
+        uint32_t b = p_pal->b[ii];
 
         fputc((int)r, f);
         fputc((int)g, f);
@@ -611,7 +611,7 @@ void GifWritePalette(struct gif_palette* pPal, FILE* f )
 }
 
 // write the image header, LZW-compress and write out the image
-void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uint32_t width, uint32_t height, uint32_t delay, struct gif_palette* pPal)
+void gif_write_lzw_image(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uint32_t width, uint32_t height, uint32_t delay, struct gif_palette* p_pal)
 {
     // graphics control extension
     fputc(0x21, f);
@@ -620,7 +620,7 @@ void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uin
     fputc(0x05, f); // leave prev frame in place, this frame has transparency
     fputc(delay & 0xff, f);
     fputc((delay >> 8) & 0xff, f);
-    fputc(gif_trans_idx, f); // transparent color index
+    fputc(gif_transparent_idx, f); // transparent color index
     fputc(0, f);
 
     fputc(0x2c, f); // image descriptor block
@@ -638,104 +638,104 @@ void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uin
     //fputc(0, f); // no local color table, no transparency
     //fputc(0x80, f); // no local color table, but transparency
 
-    fputc(0x80 + pPal->bit_depth-1, f); // local color table present, 2 ^ bitDepth entries
-    GifWritePalette(pPal, f);
+    fputc(0x80 + p_pal->bit_depth-1, f); // local color table present, 2 ^ bitDepth entries
+    gif_write_palette(p_pal, f);
 
-    const int minCodeSize = pPal->bit_depth;
-    const uint32_t clearCode = 1 << pPal->bit_depth;
+    const int min_code_size = p_pal->bit_depth;
+    const uint32_t clear_code = 1 << p_pal->bit_depth;
 
-    fputc(minCodeSize, f); // min code size 8 bits
+    fputc(min_code_size, f); // min code size 8 bits
 
-    struct GifLzwNode* codetree = (struct GifLzwNode*)GIF_TEMP_MALLOC(sizeof(struct GifLzwNode)*4096);
+    struct gif_lzw_code* codetree = (struct gif_lzw_code*)GIF_TEMP_MALLOC(sizeof(struct gif_lzw_code)*4096);
 
-    memset(codetree, 0, sizeof(struct GifLzwNode)*4096);
-    int32_t curCode = -1;
-    uint32_t codeSize = (uint32_t)minCodeSize + 1;
-    uint32_t maxCode = clearCode+1;
+    memset(codetree, 0, sizeof(struct gif_lzw_code)*4096);
+    int32_t current_code = -1;
+    uint32_t code_size = (uint32_t)min_code_size + 1;
+    uint32_t max_code = clear_code+1;
 
-    struct GifBitStatus stat;
+    struct gif_bit_status stat;
     stat.byte = 0;
-    stat.bitIndex = 0;
-    stat.chunkIndex = 0;
+    stat.bit_idx = 0;
+    stat.chunk_idx = 0;
 
-    GifWriteCode(f, &stat, clearCode, codeSize);  // start with a fresh LZW dictionary
+    gif_write_code(f, &stat, clear_code, code_size);  // start with a fresh LZW dictionary
 
     for(uint32_t yy=0; yy<height; ++yy)
     {
         for(uint32_t xx=0; xx<width; ++xx)
         {
-            uint8_t nextValue = image[(yy*width+xx)*4+3];
+            uint8_t next_value = image[(yy*width+xx)*4+3];
 
             // "loser mode" - no compression, every single code is followed immediately by a clear
             //WriteCode( f, stat, nextValue, codeSize );
             //WriteCode( f, stat, 256, codeSize );
 
-            if( curCode < 0 )
+            if( current_code < 0 )
             {
                 // first value in a new run
-                curCode = nextValue;
+                current_code = next_value;
             }
-            else if( codetree[curCode].m_next[nextValue] )
+            else if( codetree[current_code].next[next_value] )
             {
                 // current run already in the dictionary
-                curCode = codetree[curCode].m_next[nextValue];
+                current_code = codetree[current_code].next[next_value];
             }
             else
             {
                 // finish the current run, write a code
-                GifWriteCode(f, &stat, (uint32_t)curCode, codeSize);
+                gif_write_code(f, &stat, (uint32_t)current_code, code_size);
 
                 // insert the new run into the dictionary
-                codetree[curCode].m_next[nextValue] = (uint16_t)++maxCode;
+                codetree[current_code].next[next_value] = (uint16_t)++max_code;
 
-                if( maxCode >= (1ul << codeSize) )
+                if( max_code >= (1ul << code_size) )
                 {
                     // dictionary entry count has broken a size barrier,
                     // we need more bits for codes
-                    codeSize++;
+                    code_size++;
                 }
-                if( maxCode == 4095 )
+                if( max_code == 4095 )
                 {
                     // the dictionary is full, clear it out and begin anew
-                    GifWriteCode(f, &stat, clearCode, codeSize); // clear tree
+                    gif_write_code(f, &stat, clear_code, code_size); // clear tree
 
-                    memset(codetree, 0, sizeof(struct GifLzwNode)*4096);
-                    codeSize = (uint32_t)(minCodeSize + 1);
-                    maxCode = clearCode+1;
+                    memset(codetree, 0, sizeof(struct gif_lzw_code)*4096);
+                    code_size = (uint32_t)(min_code_size + 1);
+                    max_code = clear_code+1;
                 }
 
-                curCode = nextValue;
+                current_code = next_value;
             }
         }
     }
 
     // compression footer
-    GifWriteCode(f, &stat, (uint32_t)curCode, codeSize);
-    GifWriteCode(f, &stat, clearCode, codeSize);
-    GifWriteCode(f, &stat, clearCode + 1, (uint32_t)minCodeSize + 1);
+    gif_write_code(f, &stat, (uint32_t)current_code, code_size);
+    gif_write_code(f, &stat, clear_code, code_size);
+    gif_write_code(f, &stat, clear_code + 1, (uint32_t)min_code_size + 1);
 
     // write out the last partial chunk
-    while( stat.bitIndex ) GifWriteBit(&stat, 0);
-    if( stat.chunkIndex ) GifWriteChunk(f, &stat);
+    while( stat.bit_idx ) gif_write_bit(&stat, 0);
+    if( stat.chunk_idx ) gif_write_chunk(f, &stat);
 
     fputc(0, f); // image block terminator
 
     GIF_TEMP_FREE(codetree);
 }
 
-struct GifWriter
+struct gif_writer
 {
     FILE* f;
-    uint8_t* oldImage;
-    bool firstFrame;
+    uint8_t* old_image;
+    bool first_frame;
 };
 
 // Creates a gif file.
 // The input GIFWriter is assumed to be uninitialized.
 // The delay value is the time between frames in hundredths of a second - note that not all viewers pay much attention to this value.
-bool GifBegin( struct GifWriter* writer, const char* filename, uint32_t width, uint32_t height, uint32_t delay, int32_t bitDepth, bool dither )
+bool GifBegin( struct gif_writer* writer, const char* filename, uint32_t width, uint32_t height, uint32_t delay, int32_t bit_depth, bool dither )
 {
-    (void)bitDepth; (void)dither; // Mute "Unused argument" warnings
+    (void)bit_depth; (void)dither; // Mute "Unused argument" warnings
 #if defined(_MSC_VER) && (_MSC_VER >= 1400)
 	writer->f = 0;
     fopen_s(&writer->f, filename, "wb");
@@ -744,10 +744,14 @@ bool GifBegin( struct GifWriter* writer, const char* filename, uint32_t width, u
 #endif
     if(!writer->f) return false;
 
-    writer->firstFrame = true;
+    writer->first_frame = true;
 
     // allocate
-    writer->oldImage = (uint8_t*)GIF_MALLOC(width*height*4);
+    writer->old_image = (uint8_t*)GIF_MALLOC(width*height*4);
+	if(NULL == writer->old_image){
+		fprintf(stderr, "[%s:%d]\tError allocating %u bytes for writer->old_image\n", __FILE__, __LINE__, width*height*4);
+		return false;
+	}
 
     fputs("GIF89a", writer->f);
 
@@ -794,22 +798,22 @@ bool GifBegin( struct GifWriter* writer, const char* filename, uint32_t width, u
 // The GIFWriter should have been created by GIFBegin.
 // AFAIK, it is legal to use different bit depths for different frames of an image -
 // this may be handy to save bits in animations that don't change much.
-bool GifWriteFrame( struct GifWriter* writer, const uint8_t* image, uint32_t width, uint32_t height, uint32_t delay, int bitDepth, bool dither )
+bool gif_write_frame( struct gif_writer* writer, const uint8_t* image, uint32_t width, uint32_t height, uint32_t delay, int bit_depth, bool dither )
 {
     if(!writer->f) return false;
 
-    const uint8_t* oldImage = writer->firstFrame? NULL : writer->oldImage;
-    writer->firstFrame = false;
+    const uint8_t* old_image = writer->first_frame? NULL : writer->old_image;
+    writer->first_frame = false;
 
     struct gif_palette pal;
-    gif_make_palette((dither? NULL : oldImage), image, width, height, bitDepth, dither, &pal);
+    gif_make_palette((dither? NULL : old_image), image, width, height, bit_depth, dither, &pal);
 
     if(dither)
-        GifDitherImage(oldImage, image, writer->oldImage, width, height, &pal);
+        gif_dither_image(old_image, image, writer->old_image, width, height, &pal);
     else
-        GifThresholdImage(oldImage, image, writer->oldImage, width, height, &pal);
+        gif_threshold_image(old_image, image, writer->old_image, width, height, &pal);
 
-    GifWriteLzwImage(writer->f, writer->oldImage, 0, 0, width, height, delay, &pal);
+    gif_write_lzw_image(writer->f, writer->old_image, 0, 0, width, height, delay, &pal);
 
     return true;
 }
@@ -817,16 +821,18 @@ bool GifWriteFrame( struct GifWriter* writer, const uint8_t* image, uint32_t wid
 // Writes the EOF code, closes the file handle, and frees temp memory used by a GIF.
 // Many if not most viewers will still display a GIF properly if the EOF code is missing,
 // but it's still a good idea to write it out.
-bool GifEnd( struct GifWriter* writer )
+bool gif_end( struct gif_writer* writer )
 {
-    if(!writer->f) return false;
+	if(!writer->f) {
+		return false;
+	}
 
     fputc(0x3b, writer->f); // end of file
     fclose(writer->f);
-    GIF_FREE(writer->oldImage);
+    GIF_FREE(writer->old_image);
 
     writer->f = NULL;
-    writer->oldImage = NULL;
+    writer->old_image = NULL;
 
     return true;
 }
